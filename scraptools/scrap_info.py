@@ -1,8 +1,11 @@
-import fptools.fptools as fp
-
 from urllib.request import urlopen
 from bs4 import BeautifulSoup, BeautifulStoneSoup
 import re
+
+import fptools.fptools as fp
+from .test_geocode import is_latitude, is_longitude
+from .get_address import get_address_from_geo
+
 
 #########################################
 #         SCRAPRING THE ADVERT          #
@@ -49,7 +52,8 @@ get_ad_id = fp.compose(format_id, extract_id)
 
 # ie retrieve "€3,100 per month"
 def extract_price(ad):
-    return ad.find('div', {'data-testid': 'price'}).p.span.get_text()
+    price = ad.find('div', {'data-testid': 'price'})
+    return price.p.span.get_text() if price else 'NaN'
 
 
 # ie retrieve "month" from "€3,100 per month"
@@ -59,7 +63,7 @@ def format_payment_frq(price):
 
 # ie format 3,100 from from "€3,100 per month"
 def format_price(price):
-    return price.split()[0].lstrip('€')
+    return price.split()[0].lstrip('€').replace(',', '')
 
 
 # compose type functions
@@ -88,8 +92,9 @@ get_rent = fp.init_format_compose(
 
 
 # Retrieve 'House' fom <p data-testid='property-type'>
-def get_property_type(ad): return ad.find(
-    'p', {'data-testid': 'property-type'}).get_text()
+def get_property_type(ad):
+    property_type = ad.find('p', {'data-testid': 'property-type'})
+    return property_type.get_text() if property_type else 'NaN'
 
 
 ##############################
@@ -106,12 +111,12 @@ def get_property_type(ad): return ad.find(
 # : <!-- -->4
 # </li>
 def extract_overview(ad):
-    return ad.find('div', {'data-testid': 'overview'}).ul.children
+    overview = ad.find('div', {'data-testid': 'overview'})
+    return overview.ul.children if overview else 'NaN'
+
 
 # Iterate thought map() when curry with filter_map_4
 # ie retrive [['Double Bedroom', ' 4'], ['Available From', ' Immediately'], ...]
-
-
 def format_overview(overview_li): return overview_li.get_text().split(':')
 
 
@@ -139,6 +144,19 @@ is_useful_overview = init_useful_overview(
 #  'Bathroom': '3', ...}
 def format_filtered_overview(filtered_overview):
     return {overview[0]: overview[1].strip(' ') for overview in filtered_overview}
+
+
+def format_filtered_overview(filtered_overview):
+    overview_dic = {'Double Bedroom': None,
+                    'Single Bedroom': None,
+                    'Bathroom': None,
+                    'Furnished': None,
+                    'Lease': None}
+
+    for overview in filtered_overview:
+        overview_dic[overview[0]] = overview[1].strip(' ')
+
+    return overview_dic
 
 
 # Function filter_map_4 schema is as follow:
@@ -272,5 +290,71 @@ def format_description(description): return description.lstrip(
 get_description = fp.compose(format_description, extract_description)
 
 
+##############################
+#     ADVERT GEOLOCATION     #
+##############################
+
+# 3 information are related to GEOLOCATION:
+#     - geocoloation (lat/long)
+#     - the address from the advert
+#     - the address from geocoder
+
+
+#     ADVERT GEOLOCATION LAT/LONG     #
+
+def extract_geo(ad): return ad.find(
+    'a', {'data-testid': 'streetview-button'})['href']
+
+
+def format_geo(geo): return geo.lstrip(
+    'https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=').split(',')
+
+
+def init_test_geo(func_1, func_2):
+    def test_geo(lat_long):
+        lat, long = lat_long
+        tested_lat = func_1(lat)
+        tested_long = func_2(long)
+        return tested_lat, tested_long
+
+    return test_geo
+
+
+test_geo = init_test_geo(is_latitude, is_longitude)
+
+
+def format_tested_geo(tested_geo):
+    tested_lat, tested_long = tested_geo
+    return {'Latitude': tested_lat, 'Longitude': tested_long}
+
+
+get_tested_geo = fp.compose_4(
+    format_tested_geo, test_geo, format_geo, extract_geo)
+
+
+#     ADVERT ADDRESS FRON DAFT     #
+def get_address(ad):
+    address = ad.find('h1', {'data-testid': 'address'})
+    return address.get_text() if address else 'NaN'
+
+
+#     CURRY ALL    #
+# last function retrieve address from geocoder
+# with teh given geolocation lat/long
+# to increade performance could be remove
+# fetched_address = fp.compose_4(
+#     get_address_from_geo, test_geo, format_geo, extract_geo)
+
+# get_addresses = fp.init_format_compose(
+#     get_address, fetched_address, k_1='Advert', k_2='Fetched')
+
+
+get_ad_data = fp.init_format_compose(get_ad_id, get_price, get_payment_frq,
+                                     get_address, get_property_type,
+                                     get_facilities, get_ber_id, get_ber_number, get_ad_author,
+                                     get_description, k_1='id', k_2='Rent', k_3='Frequence',
+                                     k_4='Address', k_5='Type',
+                                     k_6='Facilities', k_7='Ber', k_8='Ber n', k_9='Author',
+                                     k_10='Description')
 if __name__ == "__main__":
     print('main : to be build')
